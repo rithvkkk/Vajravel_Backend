@@ -66,6 +66,7 @@ const saleItemSchema = new mongoose.Schema({
   sku: String,
   quantity: { type: Number, required: true },
   price: { type: Number, required: true },
+  isGift: { type: Boolean, default: false },
   total: { type: Number, required: true }
 });
 
