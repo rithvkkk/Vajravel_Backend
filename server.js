@@ -20,8 +20,8 @@ app.get('/', (req, res) => {
 
 // ─────────────────── AUTH MIDDLEWARE ───────────────────
 const authMiddleware = (req, res, next) => {
-  // Allow auth routes to bypass. Since it's mounted on '/api', req.path starts with '/auth'
-  if (req.path.startsWith('/auth') || req.path === '/seed') return next();
+  // Allow auth routes to bypass using originalUrl to avoid mounting path issues
+  if (req.originalUrl.startsWith('/api/auth') || req.originalUrl.startsWith('/api/seed')) return next();
   
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized: No token provided' });
