@@ -149,6 +149,7 @@ app.post('/api/categories', async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+
 // ──────────────────── PRODUCTS ────────────────────
 app.get('/api/products', async (req, res) => {
   try {
