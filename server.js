@@ -116,8 +116,22 @@ app.post('/api/auth/register', async (req, res) => {
     
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({ username, password: hashedPassword, role: role || 'admin' });
-    res.json({ success: true, message: 'User created', user: { username } });
+    res.json({ success: true, message: 'User created', user: { username, role: user.role, _id: user._id } });
   } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort('username');
+    res.json(users.map(u => ({ id: u._id.toString(), username: u.username, role: u.role })));
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ──────────────────── CATEGORIES ────────────────────
