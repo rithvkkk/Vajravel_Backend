@@ -14,10 +14,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.send('<h2>🧨 Vajravel Crackers POS API is Online!</h2><p>This backend API is not meant to be visited in the browser. Next step: Connect your frontend web app to this URL.</p>');
+});
+
 // ─────────────────── AUTH MIDDLEWARE ───────────────────
 const authMiddleware = (req, res, next) => {
-  // Allow auth routes to bypass
-  if (req.path.startsWith('/api/auth') || req.path === '/api/seed') return next();
+  // Allow auth routes to bypass. Since it's mounted on '/api', req.path starts with '/auth'
+  if (req.path.startsWith('/auth') || req.path === '/seed') return next();
   
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized: No token provided' });
