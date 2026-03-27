@@ -71,7 +71,8 @@ const saleItemSchema = new mongoose.Schema({
 });
 
 const saleSchema = new mongoose.Schema({
-  invoiceNumber: { type: String, required: true, unique: true },
+  invoiceNumber: { type: String, required: true }, 
+  clientSaleId: { type: String, unique: true, sparse: true }, // For deduplication
   customerName: { type: String, default: 'Walk-in Customer' },
   customerPhone: { type: String, default: '' },
   subtotal: { type: Number, default: 0 },
@@ -190,16 +191,22 @@ app.get('/api/sales', async (req, res) => {
 
 app.post('/api/sales', async (req, res) => {
   try {
-    const { customerName, customerPhone, items, subtotal, discount, tax, total, paymentMethod } = req.body;
+    const { clientSaleId, customerName, customerPhone, items, subtotal, discount, tax, total, paymentMethod } = req.body;
 
-    // Generate invoice number
+    // 1. Check for existing sale with this clientSaleId (Deduplication)
+    if (clientSaleId) {
+      const existing = await Sale.findOne({ clientSaleId });
+      if (existing) return res.json(toJSON(existing));
+    }
+
+    // 2. Generate invoice number
     const count = await Sale.countDocuments();
     const invoiceNumber = `VC-${String(count + 1).padStart(5, '0')}`;
 
-    // Format items
+    // 3. Format items and update stock
     const saleItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findById(item.productId || item.id);
       if (product) {
         saleItems.push({
           productId: product._id,
@@ -209,7 +216,6 @@ app.post('/api/sales', async (req, res) => {
           price: item.price,
           total: item.quantity * item.price
         });
-        // Update stock
         product.stock -= item.quantity;
         await product.save();
       }
@@ -217,6 +223,7 @@ app.post('/api/sales', async (req, res) => {
 
     const sale = await Sale.create({
       invoiceNumber,
+      clientSaleId,
       customerName: customerName || 'Walk-in Customer',
       customerPhone,
       subtotal, discount, tax, total, paymentMethod,
@@ -225,6 +232,10 @@ app.post('/api/sales', async (req, res) => {
 
     res.json(toJSON(sale));
   } catch (err) {
+    if (err.code === 11000) { // Concurrent unique constraint hit
+       const existing = await Sale.findOne({ clientSaleId: req.body.clientSaleId });
+       if (existing) return res.json(toJSON(existing));
+    }
     console.error('Sale creation error:', err);
     res.status(500).json({ error: err.message });
   }
