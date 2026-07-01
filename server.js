@@ -3,6 +3,8 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const dns = require('dns').promises;
+const net = require('net');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 4000;
@@ -34,6 +36,54 @@ app.get('/diagnostics', async (req, res) => {
     node_env: process.env.NODE_ENV,
     vercel_env: process.env.VERCEL || 'not vercel'
   };
+
+  // Perform raw DNS and TCP checks to verify network level connectivity
+  if (process.env.MONGODB_URI) {
+    const match = process.env.MONGODB_URI.match(/@([^/?#]+)/);
+    if (match) {
+      const domainWithPorts = match[1];
+      const domain = domainWithPorts.split(',')[0].split(':')[0];
+      info.db_domain = domain;
+      try {
+        // 1. Resolve SRV records
+        info.dns_srv = await dns.resolveSrv(`_mongodb._tcp.${domain}`).catch(e => ({ error: e.message }));
+        
+        // 2. Determine target hostname for TCP check
+        let targetHost = domain;
+        if (Array.isArray(info.dns_srv) && info.dns_srv.length > 0) {
+          targetHost = info.dns_srv[0].name;
+        }
+        info.tcp_target_host = targetHost;
+        
+        // 3. Resolve IP (DNS A/AAAA lookup)
+        info.dns_ips = await dns.resolve4(targetHost).catch(e => ({ error: e.message }));
+        
+        // 4. Test raw TCP connection
+        info.tcp_test = await new Promise((resolve) => {
+          const socket = new net.Socket();
+          const start = Date.now();
+          socket.setTimeout(4000);
+          
+          socket.connect(27017, targetHost, () => {
+            socket.destroy();
+            resolve({ status: 'connected', duration_ms: Date.now() - start });
+          });
+          
+          socket.on('error', (err) => {
+            socket.destroy();
+            resolve({ status: 'error', error: err.message, duration_ms: Date.now() - start });
+          });
+          
+          socket.on('timeout', () => {
+            socket.destroy();
+            resolve({ status: 'timeout', error: 'Connection timed out (firewall blocking port 27017)', duration_ms: Date.now() - start });
+          });
+        });
+      } catch (dnsErr) {
+        info.dns_test_error = dnsErr.message;
+      }
+    }
+  }
 
   try {
     if (process.env.MONGODB_URI) {
