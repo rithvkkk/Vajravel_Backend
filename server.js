@@ -18,6 +18,40 @@ app.get('/', (req, res) => {
   res.send('<h2>🧨 Vajravel Crackers POS API is Online!</h2><p>This backend API is not meant to be visited in the browser. Next step: Connect your frontend web app to this URL.</p>');
 });
 
+app.get('/diagnostics', async (req, res) => {
+  const readyState = mongoose.connection.readyState;
+  const states = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+    99: 'uninitialized'
+  };
+
+  const info = {
+    mongodb_uri_defined: !!process.env.MONGODB_URI,
+    mongodb_uri_length: process.env.MONGODB_URI ? process.env.MONGODB_URI.length : 0,
+    mongoose_connection_state: states[readyState] || readyState,
+    node_env: process.env.NODE_ENV,
+    vercel_env: process.env.VERCEL || 'not vercel'
+  };
+
+  try {
+    if (process.env.MONGODB_URI) {
+      if (readyState === 1) {
+        await mongoose.connection.db.admin().ping();
+        info.ping = 'successful';
+      } else {
+        info.ping = 'skipped (not connected)';
+      }
+    }
+  } catch (err) {
+    info.ping_error = err.message;
+  }
+
+  res.json(info);
+});
+
 // ─────────────────── AUTH MIDDLEWARE ───────────────────
 const authMiddleware = (req, res, next) => {
   // Allow auth routes to bypass using originalUrl to avoid mounting path issues
@@ -343,22 +377,31 @@ if (!MONGODB_URI) {
 
 if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
   // In Vercel serverless environment, connect to MongoDB and export the app
-  mongoose.connect(MONGODB_URI)
-    .then(() => console.log('✅ Connected to MongoDB online (Serverless)'))
-    .catch(err => console.error('❌ MongoDB connection error:', err));
+  if (MONGODB_URI) {
+    mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+      .then(() => console.log('✅ Connected to MongoDB online (Serverless)'))
+      .catch(err => console.error('❌ MongoDB connection error:', err));
+  } else {
+    console.error('❌ Cannot connect to MongoDB: MONGODB_URI is undefined!');
+  }
 } else {
   // In local development, connect and start the server
-  mongoose.connect(MONGODB_URI)
-    .then(() => {
-      console.log('✅ Connected to MongoDB online');
-      app.listen(PORT, () => {
-        console.log(`🧨 Vajravel Crackers POS API running on http://localhost:${PORT}`);
+  if (MONGODB_URI) {
+    mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+      .then(() => {
+        console.log('✅ Connected to MongoDB online');
+        app.listen(PORT, () => {
+          console.log(`🧨 Vajravel Crackers POS API running on http://localhost:${PORT}`);
+        });
+      })
+      .catch(err => {
+        console.error('❌ MongoDB connection error:', err);
+        process.exit(1);
       });
-    })
-    .catch(err => {
-      console.error('❌ MongoDB connection error:', err);
-      process.exit(1);
-    });
+  } else {
+    console.error('❌ MONGODB_URI is not set!');
+    process.exit(1);
+  }
 }
 
 module.exports = app;
