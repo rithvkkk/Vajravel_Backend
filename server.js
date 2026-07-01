@@ -19,7 +19,6 @@ app.get('/', (req, res) => {
 });
 
 app.get('/diagnostics', async (req, res) => {
-  const readyState = mongoose.connection.readyState;
   const states = {
     0: 'disconnected',
     1: 'connected',
@@ -31,22 +30,34 @@ app.get('/diagnostics', async (req, res) => {
   const info = {
     mongodb_uri_defined: !!process.env.MONGODB_URI,
     mongodb_uri_length: process.env.MONGODB_URI ? process.env.MONGODB_URI.length : 0,
-    mongoose_connection_state: states[readyState] || readyState,
+    initial_connection_state: states[mongoose.connection.readyState] || mongoose.connection.readyState,
     node_env: process.env.NODE_ENV,
     vercel_env: process.env.VERCEL || 'not vercel'
   };
 
   try {
     if (process.env.MONGODB_URI) {
-      if (readyState === 1) {
+      if (mongoose.connection.readyState !== 1) {
+        info.attempting_connect = true;
+        await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+      }
+      
+      const readyStateAfter = mongoose.connection.readyState;
+      info.final_connection_state = states[readyStateAfter] || readyStateAfter;
+      
+      if (readyStateAfter === 1) {
         await mongoose.connection.db.admin().ping();
         info.ping = 'successful';
       } else {
-        info.ping = 'skipped (not connected)';
+        info.ping = 'failed';
       }
+    } else {
+      info.error = 'MONGODB_URI is not set';
     }
   } catch (err) {
-    info.ping_error = err.message;
+    info.connection_error = err.message || String(err);
+    info.connection_error_name = err.name;
+    info.connection_error_code = err.code;
   }
 
   res.json(info);
