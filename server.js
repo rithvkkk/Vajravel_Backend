@@ -16,6 +16,54 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Database connection caching for serverless environments
+let cachedConnection = global.mongooseConnection;
+if (!cachedConnection) {
+  cachedConnection = global.mongooseConnection = { conn: null, promise: null };
+}
+
+async function connectDB() {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+  if (cachedConnection.conn) {
+    return cachedConnection.conn;
+  }
+  if (!cachedConnection.promise) {
+    const opts = {
+      bufferCommands: false,
+      serverSelectionTimeoutMS: 5000,
+    };
+    console.log('🔄 Connecting to MongoDB (initiating new connection)...');
+    cachedConnection.promise = mongoose.connect(MONGODB_URI, opts).then((m) => {
+      console.log('✅ Connected to MongoDB online');
+      return m;
+    });
+  }
+  try {
+    cachedConnection.conn = await cachedConnection.promise;
+  } catch (e) {
+    cachedConnection.promise = null;
+    throw e;
+  }
+  return cachedConnection.conn;
+}
+
+// Middleware to ensure DB connection is active before processing any API request
+const dbMiddleware = async (req, res, next) => {
+  // Allow index and diagnostics routes to bypass this middleware (diagnostics will call connectDB internally)
+  if (req.path === '/diagnostics' || req.path === '/') return next();
+
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('❌ Database connection middleware error:', err);
+    res.status(500).json({ error: `Database Connection Failed: ${err.message || String(err)}` });
+  }
+};
+app.use(dbMiddleware);
+
 app.get('/', (req, res) => {
   res.send('<h2>🧨 Vajravel Crackers POS API is Online!</h2><p>This backend API is not meant to be visited in the browser. Next step: Connect your frontend web app to this URL.</p>');
 });
@@ -89,7 +137,7 @@ app.get('/diagnostics', async (req, res) => {
     if (process.env.MONGODB_URI) {
       if (mongoose.connection.readyState !== 1) {
         info.attempting_connect = true;
-        await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+        await connectDB();
       }
       
       const readyStateAfter = mongoose.connection.readyState;
@@ -437,14 +485,8 @@ if (!MONGODB_URI) {
 }
 
 if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-  // In Vercel serverless environment, connect to MongoDB and export the app
-  if (MONGODB_URI) {
-    mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
-      .then(() => console.log('✅ Connected to MongoDB online (Serverless)'))
-      .catch(err => console.error('❌ MongoDB connection error:', err));
-  } else {
-    console.error('❌ Cannot connect to MongoDB: MONGODB_URI is undefined!');
-  }
+  // In Vercel serverless environment, connect database lazily per request via dbMiddleware
+  console.log('☁️ Vercel Serverless environment detected: database will connect lazily');
 } else {
   // In local development, connect and start the server
   if (MONGODB_URI) {
