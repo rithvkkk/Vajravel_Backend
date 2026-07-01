@@ -338,17 +338,27 @@ app.post('/api/seed', async (req, res) => {
 if (!MONGODB_URI) {
   console.error('❌ MONGODB_URI is not set in .env file!');
   console.error('Please add MONGODB_URI=mongodb+srv://... to your .env file and restart.');
-  process.exit(1);
+  if (process.env.NODE_ENV !== 'production') process.exit(1);
 }
 
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    console.log('✅ Connected to MongoDB online');
-    app.listen(PORT, () => {
-      console.log(`🧨 Vajravel Crackers POS API running on http://localhost:${PORT}`);
+if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+  // In Vercel serverless environment, connect to MongoDB and export the app
+  mongoose.connect(MONGODB_URI)
+    .then(() => console.log('✅ Connected to MongoDB online (Serverless)'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
+} else {
+  // In local development, connect and start the server
+  mongoose.connect(MONGODB_URI)
+    .then(() => {
+      console.log('✅ Connected to MongoDB online');
+      app.listen(PORT, () => {
+        console.log(`🧨 Vajravel Crackers POS API running on http://localhost:${PORT}`);
+      });
+    })
+    .catch(err => {
+      console.error('❌ MongoDB connection error:', err);
+      process.exit(1);
     });
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-    process.exit(1);
-  });
+}
+
+module.exports = app;
